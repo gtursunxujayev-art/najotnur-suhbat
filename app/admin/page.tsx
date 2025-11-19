@@ -15,6 +15,7 @@ type BotSettings = {
   greetingText: string;
   askPhoneText: string;
   askJobText: string;
+  finalMessage: string;
 };
 
 export default function AdminPage() {
@@ -32,6 +33,7 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  // Load users
   const fetchUsers = async () => {
     setLoadingUsers(true);
     setError(null);
@@ -39,14 +41,14 @@ export default function AdminPage() {
       const res = await fetch('/api/admin/users');
       const data: User[] = await res.json();
       setUsers(data);
-    } catch (e) {
-      console.error(e);
+    } catch {
       setError('Cannot load users');
     } finally {
       setLoadingUsers(false);
     }
   };
 
+  // Load bot settings
   const fetchSettings = async () => {
     setSettingsLoading(true);
     setError(null);
@@ -54,8 +56,7 @@ export default function AdminPage() {
       const res = await fetch('/api/admin/settings');
       const data: BotSettings = await res.json();
       setSettings(data);
-    } catch (e) {
-      console.error(e);
+    } catch {
       setError('Cannot load bot messages settings');
     } finally {
       setSettingsLoading(false);
@@ -68,8 +69,8 @@ export default function AdminPage() {
   }, []);
 
   const toggleSelect = (id: number) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
   };
 
@@ -77,7 +78,7 @@ export default function AdminPage() {
     if (selectedIds.length === users.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(users.map((u) => u.id));
+      setSelectedIds(users.map(u => u.id));
     }
   };
 
@@ -103,14 +104,12 @@ export default function AdminPage() {
       });
 
       const data = await res.json();
-
       if (!res.ok) {
         setError(data.error || 'Error sending messages');
       } else {
         setInfo(`Message sent to ${data.sent} user(s).`);
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
       setError('Error sending messages');
     } finally {
       setSending(false);
@@ -123,15 +122,18 @@ export default function AdminPage() {
 
   const handleSaveSettings = async () => {
     if (!settings) return;
+
     setSettingsSaving(true);
     setError(null);
     setInfo(null);
+
     try {
       const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
       });
+
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || 'Cannot save bot messages');
@@ -139,8 +141,7 @@ export default function AdminPage() {
         setSettings(data);
         setInfo('Bot messages updated successfully.');
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
       setError('Cannot save bot messages');
     } finally {
       setSettingsSaving(false);
@@ -198,7 +199,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* BOT MESSAGES SETTINGS */}
+        {/* BOT MESSAGE SETTINGS */}
         <section
           style={{
             marginBottom: '1.5rem',
@@ -216,14 +217,14 @@ export default function AdminPage() {
               color: '#475569'
             }}
           >
-            Bu yerda botning foydalanuvchiga yozadigan matnlarini
-            o&apos;zgartirasiz.
+            Bu yerda botning foydalanuvchiga yozadigan matnlarini o‘zgartirasiz.
           </p>
 
           {settingsLoading && !settings ? (
             <p>Loading bot messages...</p>
           ) : settings ? (
             <>
+              {/* GREETING */}
               <label
                 style={{
                   display: 'block',
@@ -231,27 +232,26 @@ export default function AdminPage() {
                   marginBottom: '0.25rem'
                 }}
               >
-                1. Birinchi xabar (ism so&apos;rash):
+                1. Birinchi xabar (ism so‘rash):
               </label>
               <textarea
                 value={settings.greetingText}
-                onChange={(e) =>
-                  setSettings((prev) =>
-                    prev
-                      ? { ...prev, greetingText: e.target.value }
-                      : prev
+                onChange={e =>
+                  setSettings(prev =>
+                    prev ? { ...prev, greetingText: e.target.value } : prev
                   )
                 }
                 rows={2}
                 style={{
                   width: '100%',
                   borderRadius: '0.5rem',
-                  padding: '0.5rem 0.75rem',
+                  padding: '0.5rem',
                   border: '1px solid #cbd5f5',
                   marginBottom: '0.75rem'
                 }}
               />
 
+              {/* PHONE */}
               <label
                 style={{
                   display: 'block',
@@ -259,27 +259,26 @@ export default function AdminPage() {
                   marginBottom: '0.25rem'
                 }}
               >
-                2. Telefon raqamini so&apos;rash xabari:
+                2. Telefon raqamini so‘rash xabari:
               </label>
               <textarea
                 value={settings.askPhoneText}
-                onChange={(e) =>
-                  setSettings((prev) =>
-                    prev
-                      ? { ...prev, askPhoneText: e.target.value }
-                      : prev
+                onChange={e =>
+                  setSettings(prev =>
+                    prev ? { ...prev, askPhoneText: e.target.value } : prev
                   )
                 }
                 rows={2}
                 style={{
                   width: '100%',
                   borderRadius: '0.5rem',
-                  padding: '0.5rem 0.75rem',
+                  padding: '0.5rem',
                   border: '1px solid #cbd5f5',
                   marginBottom: '0.75rem'
                 }}
               />
 
+              {/* JOB */}
               <label
                 style={{
                   display: 'block',
@@ -287,24 +286,49 @@ export default function AdminPage() {
                   marginBottom: '0.25rem'
                 }}
               >
-                3. Kasbini so&apos;rash xabari:
+                3. Kasbini so‘rash xabari:
               </label>
               <textarea
                 value={settings.askJobText}
-                onChange={(e) =>
-                  setSettings((prev) =>
-                    prev
-                      ? { ...prev, askJobText: e.target.value }
-                      : prev
+                onChange={e =>
+                  setSettings(prev =>
+                    prev ? { ...prev, askJobText: e.target.value } : prev
                   )
                 }
                 rows={2}
                 style={{
                   width: '100%',
                   borderRadius: '0.5rem',
-                  padding: '0.5rem 0.75rem',
+                  padding: '0.5rem',
                   border: '1px solid #cbd5f5',
                   marginBottom: '0.75rem'
+                }}
+              />
+
+              {/* FINAL MESSAGE */}
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '0.9rem',
+                  marginBottom: '0.25rem'
+                }}
+              >
+                4. Oxirgi xabar (ro‘yxatdan o‘tganidan keyin yuboriladi):
+              </label>
+              <textarea
+                value={settings.finalMessage}
+                onChange={e =>
+                  setSettings(prev =>
+                    prev ? { ...prev, finalMessage: e.target.value } : prev
+                  )
+                }
+                rows={3}
+                style={{
+                  width: '100%',
+                  borderRadius: '0.5rem',
+                  padding: '0.5rem',
+                  border: '1px solid #cbd5f5',
+                  marginBottom: '1rem'
                 }}
               />
 
@@ -347,6 +371,7 @@ export default function AdminPage() {
           >
             {loadingUsers ? 'Loading users...' : 'Reload users'}
           </button>
+
           <button
             onClick={handleExport}
             style={{
@@ -358,6 +383,7 @@ export default function AdminPage() {
           >
             Export CSV
           </button>
+
           <button
             onClick={selectAll}
             style={{
@@ -367,24 +393,22 @@ export default function AdminPage() {
               cursor: 'pointer'
             }}
           >
-            {selectedIds.length === users.length
-              ? 'Unselect all'
-              : 'Select all'}
+            {selectedIds.length === users.length ? 'Unselect all' : 'Select all'}
           </button>
         </div>
 
-        {/* MESSAGE SENDER */}
+        {/* SEND MESSAGE */}
         <section style={{ marginBottom: '1.5rem' }}>
           <h2 style={{ marginBottom: '0.5rem' }}>Send message</h2>
           <textarea
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={e => setMessage(e.target.value)}
             rows={4}
             placeholder="Write message for selected users..."
             style={{
               width: '100%',
               borderRadius: '0.5rem',
-              padding: '0.5rem 0.75rem',
+              padding: '0.5rem',
               border: '1px solid #cbd5f5',
               marginBottom: '0.75rem'
             }}
@@ -401,6 +425,7 @@ export default function AdminPage() {
           >
             {sending ? 'Sending...' : 'Send to selected'}
           </button>
+
           <p style={{ marginTop: '0.5rem', fontSize: '0.875rem' }}>
             Selected: {selectedIds.length} / {users.length}
           </p>
@@ -447,25 +472,22 @@ export default function AdminPage() {
                       />
                     </th>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>ID</th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
-                      Name
-                    </th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>Name</th>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>
                       Username
                     </th>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>
                       Phone
                     </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
-                      Job
-                    </th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>Job</th>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>
                       Created
                     </th>
                   </tr>
                 </thead>
+
                 <tbody>
-                  {users.map((u) => (
+                  {users.map(u => (
                     <tr key={u.id}>
                       <td
                         style={{
@@ -480,6 +502,7 @@ export default function AdminPage() {
                           onChange={() => toggleSelect(u.id)}
                         />
                       </td>
+
                       <td
                         style={{
                           padding: '0.5rem',
@@ -488,6 +511,7 @@ export default function AdminPage() {
                       >
                         {u.id}
                       </td>
+
                       <td
                         style={{
                           padding: '0.5rem',
@@ -496,6 +520,7 @@ export default function AdminPage() {
                       >
                         {u.name}
                       </td>
+
                       <td
                         style={{
                           padding: '0.5rem',
@@ -504,6 +529,7 @@ export default function AdminPage() {
                       >
                         {u.username ? `@${u.username}` : '-'}
                       </td>
+
                       <td
                         style={{
                           padding: '0.5rem',
@@ -512,6 +538,7 @@ export default function AdminPage() {
                       >
                         {u.phone}
                       </td>
+
                       <td
                         style={{
                           padding: '0.5rem',
@@ -520,6 +547,7 @@ export default function AdminPage() {
                       >
                         {u.job}
                       </td>
+
                       <td
                         style={{
                           padding: '0.5rem',
@@ -531,6 +559,7 @@ export default function AdminPage() {
                     </tr>
                   ))}
                 </tbody>
+
               </table>
             </div>
           )}
