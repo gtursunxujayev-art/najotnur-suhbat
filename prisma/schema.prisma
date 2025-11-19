@@ -1,0 +1,34 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Step {
+  ASK_NAME
+  ASK_PHONE
+  ASK_JOB
+  DONE
+}
+
+model User {
+  id         Int      @id @default(autoincrement())
+  telegramId BigInt   @unique
+  username   String?
+  name       String
+  phone      String
+  job        String
+  step       Step     @default(ASK_NAME)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model BotSettings {
+  id           Int    @id @default(1)
+  greetingText String @default("Assalomu alaykum! Ismingizni kiriting:")
+  askPhoneText String @default("Telefon raqamingizni kiriting (masalan: +99890xxxxxxx):")
+  askJobText   String @default("Kasbingiz yoki nima ish qilishingizni yozing:")
+}
