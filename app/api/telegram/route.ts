@@ -30,6 +30,7 @@ async function getOrCreateUser(telegramId: bigint, username: string | null) {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === 'P2002'
     ) {
+      // Unique constraint race-condition: load again
       return await prisma.user.findUnique({ where: { telegramId } });
     }
     throw err;
@@ -52,6 +53,7 @@ export async function POST(req: NextRequest) {
     update = await req.json();
   } catch (e) {
     console.error('Failed to parse Telegram update:', e);
+    // Always respond OK to Telegram
     return NextResponse.json({ ok: true });
   }
 
@@ -62,19 +64,19 @@ export async function POST(req: NextRequest) {
 
   const chatId: number = message.chat.id;
   const from = message.from;
-
   if (!from) return NextResponse.json({ ok: true });
 
   const telegramId: bigint = BigInt(from.id);
   const username: string | null = from.username ?? null;
-  const textRaw: string = typeof message.text === 'string' ? message.text.trim() : '';
+  const textRaw: string =
+    typeof message.text === 'string' ? message.text.trim() : '';
 
   try {
     const settings = await getBotSettings();
 
-    // ================
+    // ==================
     // /start — reset
-    // ================
+    // ==================
     if (textRaw === '/start') {
       let user = await prisma.user.findUnique({ where: { telegramId } });
 
@@ -109,7 +111,17 @@ export async function POST(req: NextRequest) {
     // Ensure user exists
     let user = await getOrCreateUser(telegramId, username);
 
-    // Update username if changed
+    // Safety check in case getOrCreateUser somehow returns null
+    if (!user) {
+      console.error('User is null after getOrCreateUser');
+      await sendTelegramMessage(
+        chatId,
+        "Xatolik yuz berdi. Iltimos, /start buyrug‘ini yuborib qayta urining."
+      );
+      return NextResponse.json({ ok: true });
+    }
+
+    // Update username if changed (non-critical)
     if (user.username !== username) {
       try {
         user = await prisma.user.update({
@@ -123,7 +135,10 @@ export async function POST(req: NextRequest) {
 
     // If no text
     if (!textRaw) {
-      await sendTelegramMessage(chatId, "Iltimos, faqat matn yuboring. Boshlash uchun /start yuboring.");
+      await sendTelegramMessage(
+        chatId,
+        "Iltimos, faqat matn yuboring. Boshlash uchun /start yuboring."
+      );
       return NextResponse.json({ ok: true });
     }
 
@@ -159,10 +174,9 @@ export async function POST(req: NextRequest) {
           data: { job: text, step: 'DONE' }
         });
 
-        // Load final message
-        const settingsDB = await prisma.botSettings.findFirst();
+        // Use finalMessage from settings (editable in admin)
         const finalMessage =
-          settingsDB?.finalMessage ||
+          settings.finalMessage ||
           "Siz Najot Nurning 21-noyabr kuni bo'lib o'tadigan biznes nonushta suhbat dasturi uchun ro'yhatdan o'tdingiz. Sizga to'liq ma'lumot uchun menejerlarimiz bog'lanishadi.";
 
         await sendTelegramMessage(chatId, finalMessage);
@@ -172,7 +186,7 @@ export async function POST(req: NextRequest) {
       case 'DONE': {
         await sendTelegramMessage(
           chatId,
-          "Siz allaqachon ro‘yxatdan o‘tganmisiz. Qayta boshlash uchun /start yuboring."
+          "Siz allaqachon ro‘yxatdan o‘tgan bo‘lsangiz kerak. Qayta boshlash uchun /start yuboring."
         );
         break;
       }
@@ -190,11 +204,17 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error('ERROR in Telegram route:', err);
 
-    await sendTelegramMessage(
-      chatId,
-      "Serverda xatolik yuz berdi. Iltimos, birozdan so‘ng qayta urinib ko‘ring."
-    );
+    try {
+      await sendTelegramMessage(
+        chatId,
+        "Serverda xatolik yuz berdi. Iltimos, birozdan so‘ng qayta urinib ko‘ring."
+      );
+    } catch (e) {
+      console.error('Failed to send error message to Telegram:', e);
+    }
 
+    // Always respond OK to Telegram
     return NextResponse.json({ ok: true });
   }
 }
+```0
