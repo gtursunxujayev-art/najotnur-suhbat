@@ -1,17 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { Prisma } from '@prisma/client';
-import {
-  buildQrUrl,
-  sendTelegramMessage,
-  sendTelegramPhoto
-} from '@/lib/telegram';
+import { sendTelegramMessage } from '@/lib/telegram';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
-// Helper: get or create user, telegramId is BIGINT now
+// Create or get existing user
 async function getOrCreateUser(telegramId: bigint, username: string | null) {
   let existing = await prisma.user.findUnique({
     where: { telegramId }
@@ -19,7 +15,7 @@ async function getOrCreateUser(telegramId: bigint, username: string | null) {
   if (existing) return existing;
 
   try {
-    const created = await prisma.user.create({
+    return await prisma.user.create({
       data: {
         telegramId,
         username,
@@ -29,37 +25,33 @@ async function getOrCreateUser(telegramId: bigint, username: string | null) {
         step: 'ASK_NAME'
       }
     });
-    return created;
   } catch (err: any) {
-    // If parallel request created same telegramId (unique), read again
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === 'P2002'
     ) {
-      const again = await prisma.user.findUnique({
-        where: { telegramId }
-      });
-      if (again) return again;
+      return await prisma.user.findUnique({ where: { telegramId } });
     }
     throw err;
   }
 }
 
+// Load settings (create defaults if not exist)
 async function getBotSettings() {
-  const settings = await prisma.botSettings.upsert({
+  return await prisma.botSettings.upsert({
     where: { id: 1 },
     update: {},
     create: {}
   });
-  return settings;
 }
 
 export async function POST(req: NextRequest) {
   let update: any;
+
   try {
     update = await req.json();
   } catch (e) {
-    console.error('Failed to parse Telegram update JSON:', e);
+    console.error('Failed to parse Telegram update:', e);
     return NextResponse.json({ ok: true });
   }
 
@@ -68,32 +60,26 @@ export async function POST(req: NextRequest) {
   const message = update.message ?? update.edited_message;
   if (!message) return NextResponse.json({ ok: true });
 
-  const chat = message.chat;
+  const chatId: number = message.chat.id;
   const from = message.from;
 
-  if (!chat || !from || !chat.id) {
-    console.log('Missing chat/from', { chat, from });
-    return NextResponse.json({ ok: true });
-  }
+  if (!from) return NextResponse.json({ ok: true });
 
-  const chatId: number = chat.id; // okay as number for sendMessage
-  // 👉 telegramId MUST be bigint for Prisma:
   const telegramId: bigint = BigInt(from.id);
   const username: string | null = from.username ?? null;
-  const textRaw: string =
-    typeof message.text === 'string' ? message.text.trim() : '';
+  const textRaw: string = typeof message.text === 'string' ? message.text.trim() : '';
 
   try {
     const settings = await getBotSettings();
 
-    // ========================
-    // /start → reset flow
-    // ========================
+    // ================
+    // /start — reset
+    // ================
     if (textRaw === '/start') {
       let user = await prisma.user.findUnique({ where: { telegramId } });
 
       if (user) {
-        user = await prisma.user.update({
+        await prisma.user.update({
           where: { id: user.id },
           data: {
             username,
@@ -104,7 +90,7 @@ export async function POST(req: NextRequest) {
           }
         });
       } else {
-        user = await prisma.user.create({
+        await prisma.user.create({
           data: {
             telegramId,
             username,
@@ -120,10 +106,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Ensure user exists (race-safe)
+    // Ensure user exists
     let user = await getOrCreateUser(telegramId, username);
 
-    // Update username if changed (non-critical)
+    // Update username if changed
     if (user.username !== username) {
       try {
         user = await prisma.user.update({
@@ -131,24 +117,21 @@ export async function POST(req: NextRequest) {
           data: { username }
         });
       } catch (e) {
-        console.warn('Failed to update username', e);
+        console.warn('Could not update username:', e);
       }
+    }
+
+    // If no text
+    if (!textRaw) {
+      await sendTelegramMessage(chatId, "Iltimos, faqat matn yuboring. Boshlash uchun /start yuboring.");
+      return NextResponse.json({ ok: true });
     }
 
     const text = textRaw;
 
-    // If no text (photo, sticker, contact, etc.)
-    if (!text) {
-      await sendTelegramMessage(
-        chatId,
-        'Iltimos, faqat matn yuboring. Boshlash uchun /start yuboring.'
-      );
-      return NextResponse.json({ ok: true });
-    }
-
-    // ========================
-    // Step-by-step flow
-    // ========================
+    // ===========================
+    // Conversation steps
+    // ===========================
     switch (user.step) {
       case 'ASK_NAME': {
         user = await prisma.user.update({
@@ -171,27 +154,25 @@ export async function POST(req: NextRequest) {
       }
 
       case 'ASK_JOB': {
-  user = await prisma.user.update({
-    where: { id: user.id },
-    data: { job: text, step: 'DONE' }
-  });
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { job: text, step: 'DONE' }
+        });
 
-  // Load customizable message from BotSettings
-  const settings = await prisma.botSettings.findFirst();
-  const finalMessage =
-    settings?.finalMessage ||
-    "Siz Najot Nurning 21-noyabr kuni bo'lib o'tadigan biznes nonushta suhbat dasturi uchun ro'yhatdan o'tdingiz. Sizga to'liq ma'lumot uchun menejerlarimiz bog'lanishadi.";
+        // Load final message
+        const settingsDB = await prisma.botSettings.findFirst();
+        const finalMessage =
+          settingsDB?.finalMessage ||
+          "Siz Najot Nurning 21-noyabr kuni bo'lib o'tadigan biznes nonushta suhbat dasturi uchun ro'yhatdan o'tdingiz. Sizga to'liq ma'lumot uchun menejerlarimiz bog'lanishadi.";
 
-  // Send final message (no QR)
-  await sendTelegramMessage(chatId, finalMessage);
+        await sendTelegramMessage(chatId, finalMessage);
+        break;
+      }
 
-  break;
-}
-        
       case 'DONE': {
         await sendTelegramMessage(
           chatId,
-          "Siz allaqachon roʻyxatdan oʻtgansiz. Qayta boshlash uchun /start yuboring."
+          "Siz allaqachon ro‘yxatdan o‘tganmisiz. Qayta boshlash uchun /start yuboring."
         );
         break;
       }
@@ -199,25 +180,19 @@ export async function POST(req: NextRequest) {
       default: {
         await sendTelegramMessage(
           chatId,
-          'Boshlash uchun /start buyrugʻini yuboring.'
+          "Boshlash uchun /start buyrug‘ini yuboring."
         );
+        break;
       }
     }
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    console.error('Prisma / bot logic error:', err);
-
-    const code = err?.code || 'NO_CODE';
-    const msg =
-      typeof err?.message === 'string'
-        ? err.message.slice(0, 120)
-        : 'NO_MESSAGE';
+    console.error('ERROR in Telegram route:', err);
 
     await sendTelegramMessage(
       chatId,
-      "Serverda xatolik yuz berdi 😔 Iltimos, birozdan so'ng qayta urinib ko'ring.\n\n" +
-        `Tech info: ${code} | ${msg}`
+      "Serverda xatolik yuz berdi. Iltimos, birozdan so‘ng qayta urinib ko‘ring."
     );
 
     return NextResponse.json({ ok: true });
