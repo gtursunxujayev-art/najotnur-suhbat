@@ -7,7 +7,6 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
-// Create or get existing user
 async function getOrCreateUser(telegramId: bigint, username: string | null) {
   let existing = await prisma.user.findUnique({
     where: { telegramId }
@@ -19,25 +18,20 @@ async function getOrCreateUser(telegramId: bigint, username: string | null) {
       data: {
         telegramId,
         username,
-        name: '',
-        phone: '',
-        job: '',
-        step: 'ASK_NAME'
+        name: "",
+        phone: "",
+        job: "",
+        step: "ASK_NAME"
       }
     });
   } catch (err: any) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === 'P2002'
-    ) {
-      // Unique constraint race-condition: load again
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return await prisma.user.findUnique({ where: { telegramId } });
     }
     throw err;
   }
 }
 
-// Load settings (create defaults if not exist)
 async function getBotSettings() {
   return await prisma.botSettings.upsert({
     where: { id: 1 },
@@ -52,12 +46,11 @@ export async function POST(req: NextRequest) {
   try {
     update = await req.json();
   } catch (e) {
-    console.error('Failed to parse Telegram update:', e);
-    // Always respond OK to Telegram
+    console.error("Failed to parse Telegram update:", e);
     return NextResponse.json({ ok: true });
   }
 
-  console.log('Telegram update:', JSON.stringify(update, null, 2));
+  console.log("Telegram update:", JSON.stringify(update, null, 2));
 
   const message = update.message ?? update.edited_message;
   if (!message) return NextResponse.json({ ok: true });
@@ -68,16 +61,12 @@ export async function POST(req: NextRequest) {
 
   const telegramId: bigint = BigInt(from.id);
   const username: string | null = from.username ?? null;
-  const textRaw: string =
-    typeof message.text === 'string' ? message.text.trim() : '';
+  const textRaw: string = typeof message.text === "string" ? message.text.trim() : "";
 
   try {
     const settings = await getBotSettings();
 
-    // ==================
-    // /start — reset
-    // ==================
-    if (textRaw === '/start') {
+    if (textRaw === "/start") {
       let user = await prisma.user.findUnique({ where: { telegramId } });
 
       if (user) {
@@ -85,10 +74,10 @@ export async function POST(req: NextRequest) {
           where: { id: user.id },
           data: {
             username,
-            name: '',
-            phone: '',
-            job: '',
-            step: 'ASK_NAME'
+            name: "",
+            phone: "",
+            job: "",
+            step: "ASK_NAME"
           }
         });
       } else {
@@ -96,10 +85,10 @@ export async function POST(req: NextRequest) {
           data: {
             telegramId,
             username,
-            name: '',
-            phone: '',
-            job: '',
-            step: 'ASK_NAME'
+            name: "",
+            phone: "",
+            job: "",
+            step: "ASK_NAME"
           }
         });
       }
@@ -108,20 +97,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Ensure user exists
     let user = await getOrCreateUser(telegramId, username);
 
-    // Safety check in case getOrCreateUser somehow returns null
     if (!user) {
-      console.error('User is null after getOrCreateUser');
-      await sendTelegramMessage(
-        chatId,
-        "Xatolik yuz berdi. Iltimos, /start buyrug‘ini yuborib qayta urining."
-      );
+      await sendTelegramMessage(chatId, "Xatolik yuz berdi. Iltimos, /start bilan qayta urinib ko‘ring.");
       return NextResponse.json({ ok: true });
     }
 
-    // Update username if changed (non-critical)
     if (user.username !== username) {
       try {
         user = await prisma.user.update({
@@ -129,92 +111,69 @@ export async function POST(req: NextRequest) {
           data: { username }
         });
       } catch (e) {
-        console.warn('Could not update username:', e);
+        console.warn("Could not update username:", e);
       }
     }
 
-    // If no text
     if (!textRaw) {
-      await sendTelegramMessage(
-        chatId,
-        "Iltimos, faqat matn yuboring. Boshlash uchun /start yuboring."
-      );
+      await sendTelegramMessage(chatId, "Iltimos, faqat matn yuboring. Boshlash uchun /start yuboring.");
       return NextResponse.json({ ok: true });
     }
 
     const text = textRaw;
 
-    // ===========================
-    // Conversation steps
-    // ===========================
     switch (user.step) {
-      case 'ASK_NAME': {
+      case "ASK_NAME": {
         user = await prisma.user.update({
           where: { id: user.id },
-          data: { name: text, step: 'ASK_PHONE' }
+          data: { name: text, step: "ASK_PHONE" }
         });
-
         await sendTelegramMessage(chatId, settings.askPhoneText);
         break;
       }
 
-      case 'ASK_PHONE': {
+      case "ASK_PHONE": {
         user = await prisma.user.update({
           where: { id: user.id },
-          data: { phone: text, step: 'ASK_JOB' }
+          data: { phone: text, step: "ASK_JOB" }
         });
-
         await sendTelegramMessage(chatId, settings.askJobText);
         break;
       }
 
-      case 'ASK_JOB': {
+      case "ASK_JOB": {
         user = await prisma.user.update({
           where: { id: user.id },
-          data: { job: text, step: 'DONE' }
+          data: { job: text, step: "DONE" }
         });
 
-        // Use finalMessage from settings (editable in admin)
         const finalMessage =
           settings.finalMessage ||
-          "Siz Najot Nurning 21-noyabr kuni bo'lib o'tadigan biznes nonushta suhbat dasturi uchun ro'yhatdan o'tdingiz. Sizga to'liq ma'lumot uchun menejerlarimiz bog'lanishadi.";
+          "Siz Najot Nurning 21-noyabr kuni bo'lib o'tadigan biznes nonushta suhbat dasturi uchun ro'yhatdan o'tdingiz. Sizga to‘liq ma'lumot uchun menejerlarimiz bog‘lanishadi.";
 
         await sendTelegramMessage(chatId, finalMessage);
         break;
       }
 
-      case 'DONE': {
-        await sendTelegramMessage(
-          chatId,
-          "Siz allaqachon ro‘yxatdan o‘tgan bo‘lsangiz kerak. Qayta boshlash uchun /start yuboring."
-        );
+      case "DONE": {
+        await sendTelegramMessage(chatId, "Siz allaqachon ro‘yxatdan o‘tganmisiz. Qayta boshlash uchun /start yuboring.");
         break;
       }
 
       default: {
-        await sendTelegramMessage(
-          chatId,
-          "Boshlash uchun /start buyrug‘ini yuboring."
-        );
+        await sendTelegramMessage(chatId, "Boshlash uchun /start buyrug‘ini yuboring.");
         break;
       }
     }
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    console.error('ERROR in Telegram route:', err);
+    console.error("ERROR in Telegram route:", err);
 
     try {
-      await sendTelegramMessage(
-        chatId,
-        "Serverda xatolik yuz berdi. Iltimos, birozdan so‘ng qayta urinib ko‘ring."
-      );
-    } catch (e) {
-      console.error('Failed to send error message to Telegram:', e);
-    }
+      await sendTelegramMessage(chatId, "Serverda xatolik yuz berdi. Iltimos, keyinroq yana urinib ko‘ring.");
+    } catch {}
 
-    // Always respond OK to Telegram
     return NextResponse.json({ ok: true });
   }
 }
-```0
