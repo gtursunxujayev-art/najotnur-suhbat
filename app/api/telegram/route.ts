@@ -171,27 +171,23 @@ export async function POST(req: NextRequest) {
       }
 
       case 'ASK_JOB': {
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: { job: text, step: 'DONE' }
-        });
+  user = await prisma.user.update({
+    where: { id: user.id },
+    data: { job: text, step: 'DONE' }
+  });
 
-        // For scanner + Google Sheets: "Name,Phone"
-        const qrText = `${user.name},${user.phone}`;
-        const qrUrl = buildQrUrl(qrText);
+  // Load customizable message from BotSettings
+  const settings = await prisma.botSettings.findFirst();
+  const finalMessage =
+    settings?.finalMessage ||
+    "Siz Najot Nurning 21-noyabr kuni bo'lib o'tadigan biznes nonushta suhbat dasturi uchun ro'yhatdan o'tdingiz. Sizga to'liq ma'lumot uchun menejerlarimiz bog'lanishadi.";
 
-        await sendTelegramMessage(
-          chatId,
-          'Rahmat! Mana sizning QR-kodingiz:'
-        );
-        await sendTelegramPhoto(
-          chatId,
-          qrUrl,
-          `QR matni:\n${qrText}`
-        );
-        break;
-      }
+  // Send final message (no QR)
+  await sendTelegramMessage(chatId, finalMessage);
 
+  break;
+}
+        
       case 'DONE': {
         await sendTelegramMessage(
           chatId,
