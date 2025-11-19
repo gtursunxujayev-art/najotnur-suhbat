@@ -27,8 +27,9 @@ model User {
 }
 
 model BotSettings {
-  id           Int    @id @default(1)
-  greetingText String @default("Assalomu alaykum! Ismingizni kiriting:")
-  askPhoneText String @default("Telefon raqamingizni kiriting (masalan: +99890xxxxxxx):")
-  askJobText   String @default("Kasbingiz yoki nima ish qilishingizni yozing:")
+  id             Int      @id @default(autoincrement())
+  welcomeMessage String?
+  finalMessage   String?   // NEW FIELD
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
