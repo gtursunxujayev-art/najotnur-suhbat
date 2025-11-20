@@ -320,8 +320,98 @@ export async function POST(req: NextRequest) {
 
     const isAdmin = await isAdminTelegram(telegramId);
 
+    // ===============================
+    // ADMIN COMMANDS: ADD / REMOVE OTHER ADMINS
+    // ===============================
+    if (isAdmin && textRaw.startsWith('/addadmin')) {
+      const parts = textRaw.split(' ');
+      if (parts.length < 2) {
+        await sendTelegramMessage(chatId, 'Foydalanish: /addadmin <telegramId>');
+        return NextResponse.json({ ok: true });
+      }
+
+      const newAdminId = parts[1].trim();
+
+      if (!/^\d+$/.test(newAdminId)) {
+        await sendTelegramMessage(chatId, 'Iltimos faqat raqam kiriting.');
+        return NextResponse.json({ ok: true });
+      }
+
+      const newAdminIdBig = BigInt(newAdminId);
+
+      const exists = await prisma.admin.findUnique({
+        where: { telegramId: newAdminIdBig }
+      });
+
+      if (exists) {
+        await sendTelegramMessage(
+          chatId,
+          'Ushbu foydalanuvchi allaqachon admin.'
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      await prisma.admin.create({
+        data: {
+          telegramId: newAdminIdBig,
+          username: null
+        }
+      });
+
+      await sendTelegramMessage(
+        chatId,
+        `Yangi admin qo‘shildi: ${newAdminId}`
+      );
+      return NextResponse.json({ ok: true });
+    }
+
+    if (isAdmin && textRaw.startsWith('/removeadmin')) {
+      const parts = textRaw.split(' ');
+      if (parts.length < 2) {
+        await sendTelegramMessage(
+          chatId,
+          'Foydalanish: /removeadmin <telegramId>'
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      const removeId = parts[1].trim();
+
+      if (!/^\d+$/.test(removeId)) {
+        await sendTelegramMessage(chatId, 'Iltimos faqat raqam kiriting.');
+        return NextResponse.json({ ok: true });
+      }
+
+      const removeIdBig = BigInt(removeId);
+
+      // cannot delete yourself
+      if (removeIdBig === telegramId) {
+        await sendTelegramMessage(
+          chatId,
+          "O'zingizni admin ro'yxatidan o‘chirib tashlay olmaysiz."
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      const target = await prisma.admin.findUnique({
+        where: { telegramId: removeIdBig }
+      });
+
+      if (!target) {
+        await sendTelegramMessage(chatId, 'Bunday admin topilmadi.');
+        return NextResponse.json({ ok: true });
+      }
+
+      await prisma.admin.delete({
+        where: { telegramId: removeIdBig }
+      });
+
+      await sendTelegramMessage(chatId, `Admin o‘chirildi: ${removeId}`);
+      return NextResponse.json({ ok: true });
+    }
+
     // =========================
-    // ADMIN BROADCAST MODE (any message except /start)
+    // ADMIN BROADCAST MODE (any message except handled commands)
     // =========================
     if (isAdmin) {
       const settings = await getBotSettings();
