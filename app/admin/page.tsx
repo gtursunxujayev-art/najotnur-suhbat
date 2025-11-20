@@ -18,6 +18,13 @@ type BotSettings = {
   finalMessage: string;
 };
 
+type EventItem = {
+  id: number;
+  title: string;
+  dateTime: string;
+  isActive: boolean;
+};
+
 export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -29,6 +36,15 @@ export default function AdminPage() {
   const [settings, setSettings] = useState<BotSettings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
+
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [creatingEvent, setCreatingEvent] = useState(false);
+  const [newEventTitle, setNewEventTitle] = useState('');
+  const [newEventDateTime, setNewEventDateTime] = useState('');
+  const [settingActiveId, setSettingActiveId] = useState<number | null>(
+    null
+  );
 
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -63,14 +79,30 @@ export default function AdminPage() {
     }
   };
 
+  // Load events
+  const fetchEvents = async () => {
+    setEventsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/events');
+      const data: EventItem[] = await res.json();
+      setEvents(data);
+    } catch {
+      setError('Cannot load events');
+    } finally {
+      setEventsLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
     fetchSettings();
+    fetchEvents();
   }, []);
 
   const toggleSelect = (id: number) => {
-    setSelectedIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   };
 
@@ -78,7 +110,7 @@ export default function AdminPage() {
     if (selectedIds.length === users.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(users.map(u => u.id));
+      setSelectedIds(users.map((u) => u.id));
     }
   };
 
@@ -148,6 +180,72 @@ export default function AdminPage() {
     }
   };
 
+  const handleCreateEvent = async () => {
+    if (!newEventTitle.trim()) {
+      setError('Event title is required');
+      return;
+    }
+    if (!newEventDateTime.trim()) {
+      setError('Event date/time is required');
+      return;
+    }
+
+    setCreatingEvent(true);
+    setError(null);
+    setInfo(null);
+
+    try {
+      const res = await fetch('/api/admin/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newEventTitle,
+          dateTime: newEventDateTime
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Cannot create event');
+      } else {
+        setInfo('Event created successfully.');
+        setNewEventTitle('');
+        setNewEventDateTime('');
+        await fetchEvents();
+      }
+    } catch {
+      setError('Cannot create event');
+    } finally {
+      setCreatingEvent(false);
+    }
+  };
+
+  const handleSetActiveEvent = async (id: number) => {
+    setSettingActiveId(id);
+    setError(null);
+    setInfo(null);
+
+    try {
+      const res = await fetch('/api/admin/events/set-current', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: id })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Cannot set active event');
+      } else {
+        setEvents(data);
+        setInfo('Active event updated.');
+      }
+    } catch {
+      setError('Cannot set active event');
+    } finally {
+      setSettingActiveId(null);
+    }
+  };
+
   return (
     <main
       style={{
@@ -168,7 +266,8 @@ export default function AdminPage() {
       >
         <h1 style={{ marginBottom: '0.5rem' }}>Admin panel</h1>
         <p style={{ marginBottom: '1.5rem' }}>
-          Users list, CSV export, bulk messages and bot text settings.
+          Users list, CSV export, bulk messages, bot text settings and event
+          management.
         </p>
 
         {error && (
@@ -199,7 +298,190 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* BOT MESSAGE SETTINGS */}
+        {/* EVENTS SECTION */}
+        <section
+          style={{
+            marginBottom: '1.5rem',
+            padding: '1rem',
+            borderRadius: '0.75rem',
+            border: '1px solid #e2e8f0',
+            background: '#f8fafc'
+          }}
+        >
+          <h2 style={{ marginBottom: '0.5rem' }}>Events</h2>
+          <p
+            style={{
+              marginBottom: '0.75rem',
+              fontSize: '0.9rem',
+              color: '#475569'
+            }}
+          >
+            Bu bo‘limda tadbir yaratish va hozirgi aktiv tadbirni tanlaysiz.
+            Bot foydalanuvchilarni shu aktiv tadbirga bog‘laydi.
+          </p>
+
+          {/* Create event form */}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '0.5rem',
+              marginBottom: '1rem'
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Event title (masalan: Biznes nonushta)"
+              value={newEventTitle}
+              onChange={(e) => setNewEventTitle(e.target.value)}
+              style={{
+                flex: '2 1 240px',
+                padding: '0.5rem',
+                borderRadius: '0.5rem',
+                border: '1px solid #cbd5e1'
+              }}
+            />
+            <input
+              type="datetime-local"
+              value={newEventDateTime}
+              onChange={(e) => setNewEventDateTime(e.target.value)}
+              style={{
+                flex: '1 1 200px',
+                padding: '0.5rem',
+                borderRadius: '0.5rem',
+                border: '1px solid #cbd5e1'
+              }}
+            />
+            <button
+              onClick={handleCreateEvent}
+              disabled={creatingEvent}
+              style={{
+                padding: '0.5rem 1rem',
+                borderRadius: '0.5rem',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              {creatingEvent ? 'Creating...' : 'Create event'}
+            </button>
+          </div>
+
+          {/* Events list */}
+          {eventsLoading ? (
+            <p>Loading events...</p>
+          ) : events.length === 0 ? (
+            <p>Hali tadbirlar yo‘q.</p>
+          ) : (
+            <div
+              style={{
+                maxHeight: '220px',
+                overflow: 'auto',
+                borderRadius: '0.5rem',
+                border: '1px solid #e2e8f0'
+              }}
+            >
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontSize: '0.9rem'
+                }}
+              >
+                <thead
+                  style={{
+                    position: 'sticky',
+                    top: 0,
+                    background: '#e2e8f0',
+                    zIndex: 1
+                  }}
+                >
+                  <tr>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
+                      ID
+                    </th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
+                      Title
+                    </th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
+                      Date/Time
+                    </th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
+                      Status
+                    </th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.map((ev) => (
+                    <tr key={ev.id}>
+                      <td
+                        style={{
+                          padding: '0.5rem',
+                          borderTop: '1px solid #e5e7eb'
+                        }}
+                      >
+                        {ev.id}
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.5rem',
+                          borderTop: '1px solid #e5e7eb'
+                        }}
+                      >
+                        {ev.title}
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.5rem',
+                          borderTop: '1px solid #e5e7eb'
+                        }}
+                      >
+                        {new Date(ev.dateTime).toLocaleString()}
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.5rem',
+                          borderTop: '1px solid #e5e7eb'
+                        }}
+                      >
+                        {ev.isActive ? 'ACTIVE' : '-'}
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.5rem',
+                          borderTop: '1px solid #e5e7eb'
+                        }}
+                      >
+                        {ev.isActive ? (
+                          <span>Current</span>
+                        ) : (
+                          <button
+                            onClick={() => handleSetActiveEvent(ev.id)}
+                            disabled={settingActiveId === ev.id}
+                            style={{
+                              padding: '0.25rem 0.75rem',
+                              borderRadius: '0.5rem',
+                              border: 'none',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {settingActiveId === ev.id
+                              ? 'Setting...'
+                              : 'Set active'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* BOT MESSAGES SETTINGS */}
         <section
           style={{
             marginBottom: '1.5rem',
@@ -217,14 +499,14 @@ export default function AdminPage() {
               color: '#475569'
             }}
           >
-            Bu yerda botning foydalanuvchiga yozadigan matnlarini o‘zgartirasiz.
+            Bu yerda botning foydalanuvchiga yozadigan matnlarini
+            o‘zgartirasiz.
           </p>
 
           {settingsLoading && !settings ? (
             <p>Loading bot messages...</p>
           ) : settings ? (
             <>
-              {/* GREETING */}
               <label
                 style={{
                   display: 'block',
@@ -236,9 +518,11 @@ export default function AdminPage() {
               </label>
               <textarea
                 value={settings.greetingText}
-                onChange={e =>
-                  setSettings(prev =>
-                    prev ? { ...prev, greetingText: e.target.value } : prev
+                onChange={(e) =>
+                  setSettings((prev) =>
+                    prev
+                      ? { ...prev, greetingText: e.target.value }
+                      : prev
                   )
                 }
                 rows={2}
@@ -251,7 +535,6 @@ export default function AdminPage() {
                 }}
               />
 
-              {/* PHONE */}
               <label
                 style={{
                   display: 'block',
@@ -263,9 +546,11 @@ export default function AdminPage() {
               </label>
               <textarea
                 value={settings.askPhoneText}
-                onChange={e =>
-                  setSettings(prev =>
-                    prev ? { ...prev, askPhoneText: e.target.value } : prev
+                onChange={(e) =>
+                  setSettings((prev) =>
+                    prev
+                      ? { ...prev, askPhoneText: e.target.value }
+                      : prev
                   )
                 }
                 rows={2}
@@ -278,7 +563,6 @@ export default function AdminPage() {
                 }}
               />
 
-              {/* JOB */}
               <label
                 style={{
                   display: 'block',
@@ -290,9 +574,11 @@ export default function AdminPage() {
               </label>
               <textarea
                 value={settings.askJobText}
-                onChange={e =>
-                  setSettings(prev =>
-                    prev ? { ...prev, askJobText: e.target.value } : prev
+                onChange={(e) =>
+                  setSettings((prev) =>
+                    prev
+                      ? { ...prev, askJobText: e.target.value }
+                      : prev
                   )
                 }
                 rows={2}
@@ -305,7 +591,6 @@ export default function AdminPage() {
                 }}
               />
 
-              {/* FINAL MESSAGE */}
               <label
                 style={{
                   display: 'block',
@@ -317,9 +602,11 @@ export default function AdminPage() {
               </label>
               <textarea
                 value={settings.finalMessage}
-                onChange={e =>
-                  setSettings(prev =>
-                    prev ? { ...prev, finalMessage: e.target.value } : prev
+                onChange={(e) =>
+                  setSettings((prev) =>
+                    prev
+                      ? { ...prev, finalMessage: e.target.value }
+                      : prev
                   )
                 }
                 rows={3}
@@ -397,12 +684,12 @@ export default function AdminPage() {
           </button>
         </div>
 
-        {/* SEND MESSAGE */}
+        {/* MESSAGE SENDER */}
         <section style={{ marginBottom: '1.5rem' }}>
           <h2 style={{ marginBottom: '0.5rem' }}>Send message</h2>
           <textarea
             value={message}
-            onChange={e => setMessage(e.target.value)}
+            onChange={(e) => setMessage(e.target.value)}
             rows={4}
             placeholder="Write message for selected users..."
             style={{
@@ -425,7 +712,6 @@ export default function AdminPage() {
           >
             {sending ? 'Sending...' : 'Send to selected'}
           </button>
-
           <p style={{ marginTop: '0.5rem', fontSize: '0.875rem' }}>
             Selected: {selectedIds.length} / {users.length}
           </p>
@@ -472,22 +758,25 @@ export default function AdminPage() {
                       />
                     </th>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>ID</th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>Name</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
+                      Name
+                    </th>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>
                       Username
                     </th>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>
                       Phone
                     </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>Job</th>
+                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
+                      Job
+                    </th>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>
                       Created
                     </th>
                   </tr>
                 </thead>
-
                 <tbody>
-                  {users.map(u => (
+                  {users.map((u) => (
                     <tr key={u.id}>
                       <td
                         style={{
@@ -502,7 +791,6 @@ export default function AdminPage() {
                           onChange={() => toggleSelect(u.id)}
                         />
                       </td>
-
                       <td
                         style={{
                           padding: '0.5rem',
@@ -511,7 +799,6 @@ export default function AdminPage() {
                       >
                         {u.id}
                       </td>
-
                       <td
                         style={{
                           padding: '0.5rem',
@@ -520,7 +807,6 @@ export default function AdminPage() {
                       >
                         {u.name}
                       </td>
-
                       <td
                         style={{
                           padding: '0.5rem',
@@ -529,7 +815,6 @@ export default function AdminPage() {
                       >
                         {u.username ? `@${u.username}` : '-'}
                       </td>
-
                       <td
                         style={{
                           padding: '0.5rem',
@@ -538,7 +823,6 @@ export default function AdminPage() {
                       >
                         {u.phone}
                       </td>
-
                       <td
                         style={{
                           padding: '0.5rem',
@@ -547,7 +831,6 @@ export default function AdminPage() {
                       >
                         {u.job}
                       </td>
-
                       <td
                         style={{
                           padding: '0.5rem',
@@ -559,7 +842,6 @@ export default function AdminPage() {
                     </tr>
                   ))}
                 </tbody>
-
               </table>
             </div>
           )}
