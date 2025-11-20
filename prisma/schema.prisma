@@ -15,22 +15,23 @@ enum Step {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  telegramId BigInt  @unique
-  username  String?
-  name      String
-  phone     String
-  job       String
-  step      Step     @default(ASK_NAME)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         Int      @id @default(autoincrement())
+  telegramId BigInt   @unique
+  username   String?
+  name       String
+  phone      String
+  job        String
+  step       Step     @default(ASK_NAME)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model BotSettings {
-  id            Int      @id @default(1)
-  greetingText  String   @default("Assalomu alaykum! Ismingizni kiriting:")
-  askPhoneText  String   @default("Telefon raqamingizni kiriting (masalan: +99890xxxxxxx):")
-  askJobText    String   @default("Kasbingiz yoki nima ish qilishingizni yozing:")
-  finalMessage  String   @default("Siz Najot Nurning 21-noyabr kuni bo'lib o'tadigan biznes nonushta suhbat dasturi uchun ro'yhatdan o'tdingiz. Sizga to‘liq ma'lumot uchun menejerlarimiz bog‘lanishadi.")
-  broadcastText String?
+  id                  Int      @id @default(1)
+  greetingText        String   @default("Assalomu alaykum! Ismingizni kiriting:")
+  askPhoneText        String   @default("Telefon raqamingizni kiriting (masalan: +99890xxxxxxx):")
+  askJobText          String   @default("Kasbingiz yoki nima ish qilishingizni yozing:")
+  finalMessage        String   @default("Siz Najot Nurning 21-noyabr kuni bo'lib o'tadigan biznes nonushta suhbat dasturi uchun ro'yhatdan o'tdingiz. Sizga to‘liq ma'lumot uchun menejerlarimiz bog‘lanishadi.")
+  broadcastFromChatId BigInt?
+  broadcastMessageId  Int?
 }
