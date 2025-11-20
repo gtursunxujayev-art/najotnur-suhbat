@@ -15,15 +15,17 @@ enum Step {
 }
 
 model User {
-  id         Int      @id @default(autoincrement())
-  telegramId BigInt   @unique
+  id         Int         @id @default(autoincrement())
+  telegramId BigInt      @unique
   username   String?
   name       String
   phone      String
   job        String
-  step       Step     @default(ASK_NAME)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  step       Step        @default(ASK_NAME)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  userEvents UserEvent[]
 }
 
 model BotSettings {
@@ -34,4 +36,42 @@ model BotSettings {
   finalMessage        String   @default("Siz Najot Nurning 21-noyabr kuni bo'lib o'tadigan biznes nonushta suhbat dasturi uchun ro'yhatdan o'tdingiz. Sizga to‘liq ma'lumot uchun menejerlarimiz bog‘lanishadi.")
   broadcastFromChatId BigInt?
   broadcastMessageId  Int?
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model Admin {
+  id         Int      @id @default(autoincrement())
+  telegramId BigInt   @unique
+  username   String?
+  createdAt  DateTime @default(now())
+}
+
+model Event {
+  id         Int         @id @default(autoincrement())
+  title      String
+  dateTime   DateTime
+  isActive   Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  userEvents UserEvent[]
+}
+
+model UserEvent {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  eventId    Int
+  coming     Boolean?
+  reminded1  Boolean  @default(false) // 1 day before reminder sent
+  reminded2  Boolean  @default(false) // 1 hour before reminder sent
+  reminded3  Boolean  @default(false) // 30 min before reminder sent
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id])
+  event Event @relation(fields: [eventId], references: [id])
+
+  @@unique([userId, eventId])
 }
