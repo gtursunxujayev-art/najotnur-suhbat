@@ -1,0 +1,7 @@
+{
+  "crons": [
+    { "path": "/api/events/remind-1day", "schedule": "0 * * * *" },
+    { "path": "/api/events/remind-1hour", "schedule": "*/10 * * * *" },
+    { "path": "/api/events/remind-30min", "schedule": "*/5 * * * *" }
+  ]
+}
