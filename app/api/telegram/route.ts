@@ -7,15 +7,22 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
-// Admin Telegram ID from ENV
-const ADMIN_TELEGRAM_ID =
-  process.env.ADMIN_TELEGRAM_ID ? BigInt(process.env.ADMIN_TELEGRAM_ID) : null;
-
-// Bot token for direct API calls (copyMessage, sendMessage with buttons)
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID
+  ? BigInt(process.env.ADMIN_TELEGRAM_ID)
+  : null;
 
-// Send inline Yes/No keyboard to admin
-async function sendConfirmKeyboard(chatId: number, text: string) {
+// Check if telegramId is admin (via DB + optional ENV bootstrap)
+async function isAdminTelegram(telegramId: bigint): Promise<boolean> {
+  if (ADMIN_TELEGRAM_ID && telegramId === ADMIN_TELEGRAM_ID) {
+    return true;
+  }
+  const admin = await prisma.admin.findUnique({ where: { telegramId } });
+  return !!admin;
+}
+
+// Helper: send confirm keyboard for admin broadcast
+async function sendBroadcastConfirmKeyboard(chatId: number, text: string) {
   if (!TELEGRAM_BOT_TOKEN) {
     console.error('TELEGRAM_BOT_TOKEN env is not set');
     return;
@@ -40,12 +47,15 @@ async function sendConfirmKeyboard(chatId: number, text: string) {
       }
     );
   } catch (e) {
-    console.error('Failed to send confirm keyboard:', e);
+    console.error('Failed to send broadcast confirm keyboard:', e);
   }
 }
 
 // Create or get existing user
-async function getOrCreateUser(telegramId: bigint, username: string | null) {
+async function getOrCreateUser(
+  telegramId: bigint,
+  username: string | null
+) {
   let existing = await prisma.user.findUnique({
     where: { telegramId }
   });
@@ -82,6 +92,14 @@ async function getBotSettings() {
   });
 }
 
+// Get active event (one at a time)
+async function getActiveEvent() {
+  return await prisma.event.findFirst({
+    where: { isActive: true },
+    orderBy: { dateTime: 'asc' }
+  });
+}
+
 export async function POST(req: NextRequest) {
   let update: any;
 
@@ -95,7 +113,7 @@ export async function POST(req: NextRequest) {
   console.log('Telegram update:', JSON.stringify(update, null, 2));
 
   // =======================
-  // 1) HANDLE CALLBACK QUERY
+  // 1) CALLBACK QUERY HANDLING
   // =======================
   const callback = update.callback_query;
   if (callback) {
@@ -108,90 +126,145 @@ export async function POST(req: NextRequest) {
     }
 
     const chatId: number = callbackMessage.chat.id;
-    const fromId: bigint = BigInt(from.id);
+    const fromTelegramId: bigint = BigInt(from.id);
 
-    // Only admin can press these buttons
-    if (!ADMIN_TELEGRAM_ID || fromId !== ADMIN_TELEGRAM_ID) {
-      await sendTelegramMessage(
-        chatId,
-        'Bu tugmalar faqat admin uchun.'
-      );
+    // ---- Broadcast callbacks (admin only) ----
+    if (data === 'broadcast_yes' || data === 'broadcast_no') {
+      const isAdmin = await isAdminTelegram(fromTelegramId);
+
+      if (!isAdmin) {
+        await sendTelegramMessage(
+          chatId,
+          'Bu tugmalar faqat admin uchun.'
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      const settings = await getBotSettings();
+
+      if (data === 'broadcast_yes') {
+        const fromChatId = settings.broadcastFromChatId;
+        const messageId = settings.broadcastMessageId;
+
+        if (!fromChatId || !messageId) {
+          await sendTelegramMessage(
+            chatId,
+            'Yuboriladigan xabar topilmadi.'
+          );
+          return NextResponse.json({ ok: true });
+        }
+
+        if (!TELEGRAM_BOT_TOKEN) {
+          console.error('Missing TELEGRAM_BOT_TOKEN for broadcast');
+          await sendTelegramMessage(
+            chatId,
+            'Server konfiguratsiyasida xatolik (bot token topilmadi).'
+          );
+          return NextResponse.json({ ok: true });
+        }
+
+        const users = await prisma.user.findMany();
+        let sent = 0;
+
+        for (const u of users) {
+          try {
+            await fetch(
+              `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/copyMessage`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: String(u.telegramId),
+                  from_chat_id: String(fromChatId),
+                  message_id: messageId
+                })
+              }
+            );
+            sent++;
+          } catch (e) {
+            console.error('Failed to send broadcast to user', u.id, e);
+          }
+        }
+
+        await prisma.botSettings.update({
+          where: { id: 1 },
+          data: {
+            broadcastFromChatId: null,
+            broadcastMessageId: null
+          }
+        });
+
+        await sendTelegramMessage(
+          chatId,
+          `Xabar ${sent} ta foydalanuvchiga yuborildi.`
+        );
+      }
+
+      if (data === 'broadcast_no') {
+        await prisma.botSettings.update({
+          where: { id: 1 },
+          data: {
+            broadcastFromChatId: null,
+            broadcastMessageId: null
+          }
+        });
+
+        await sendTelegramMessage(chatId, 'Yuborish bekor qilindi.');
+      }
+
       return NextResponse.json({ ok: true });
     }
 
-    const settings = await getBotSettings();
+    // ---- Event confirmation callbacks (users) ----
+    if (data.startsWith('event_yes:') || data.startsWith('event_no:')) {
+      const parts = data.split(':');
+      const idStr = parts[1];
+      const userEventId = Number(idStr);
 
-    if (data === 'broadcast_yes') {
-      const fromChatId = settings.broadcastFromChatId;
-      const messageId = settings.broadcastMessageId;
+      if (!userEventId || Number.isNaN(userEventId)) {
+        await sendTelegramMessage(chatId, 'Xatolik: noto‘g‘ri callback.');
+        return NextResponse.json({ ok: true });
+      }
 
-      if (!fromChatId || !messageId) {
+      const ue = await prisma.userEvent.findUnique({
+        where: { id: userEventId },
+        include: { event: true, user: true }
+      });
+
+      if (!ue) {
         await sendTelegramMessage(
           chatId,
-          'Yuboriladigan xabar topilmadi (broadcast maʼlumotlari yo‘q).'
+          'Bu eslatma topilmadi yoki eskirgan.'
         );
         return NextResponse.json({ ok: true });
       }
 
-      if (!TELEGRAM_BOT_TOKEN) {
-        console.error('TELEGRAM_BOT_TOKEN missing, cannot broadcast');
+      if (data.startsWith('event_yes:')) {
+        await prisma.userEvent.update({
+          where: { id: ue.id },
+          data: { coming: true }
+        });
+
         await sendTelegramMessage(
           chatId,
-          'Server konfiguratsiyasida xatolik (bot token topilmadi).'
+          `✅ Rahmat! Siz "${ue.event.title}" tadbiriga kelasiz deb belgilandi.`
         );
-        return NextResponse.json({ ok: true });
+      } else {
+        await prisma.userEvent.update({
+          where: { id: ue.id },
+          data: { coming: false }
+        });
+
+        await sendTelegramMessage(
+          chatId,
+          `❌ Siz "${ue.event.title}" tadbiriga bormaslikni tanladingiz.`
+        );
       }
 
-      const users = await prisma.user.findMany();
-      let sent = 0;
-
-      for (const u of users) {
-        try {
-          await fetch(
-            `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/copyMessage`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: String(u.telegramId), // BigInt → string
-                from_chat_id: String(fromChatId), // BigInt → string
-                message_id: messageId
-              })
-            }
-          );
-          sent++;
-        } catch (e) {
-          console.error('Failed to copyMessage to user', u.id, e);
-        }
-      }
-
-      // Clear broadcast message after sending
-      await prisma.botSettings.update({
-        where: { id: 1 },
-        data: {
-          broadcastFromChatId: null,
-          broadcastMessageId: null
-        }
-      });
-
-      await sendTelegramMessage(
-        chatId,
-        `Xabar ${sent} ta foydalanuvchiga yuborildi.`
-      );
+      return NextResponse.json({ ok: true });
     }
 
-    if (data === 'broadcast_no') {
-      await prisma.botSettings.update({
-        where: { id: 1 },
-        data: {
-          broadcastFromChatId: null,
-          broadcastMessageId: null
-        }
-      });
-
-      await sendTelegramMessage(chatId, 'Yuborish bekor qilindi.');
-    }
-
+    // Unknown callback
     return NextResponse.json({ ok: true });
   }
 
@@ -211,10 +284,10 @@ export async function POST(req: NextRequest) {
     typeof message.text === 'string' ? message.text.trim() : '';
 
   try {
-    const settings = await getBotSettings();
-
-    // /start — reset conversation (for everyone)
+    // /start — reset conversation (everyone)
     if (textRaw === '/start') {
+      const settings = await getBotSettings();
+
       let user = await prisma.user.findUnique({ where: { telegramId } });
 
       if (user) {
@@ -245,24 +318,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    const isAdmin =
-      ADMIN_TELEGRAM_ID !== null && telegramId === ADMIN_TELEGRAM_ID;
+    const isAdmin = await isAdminTelegram(telegramId);
 
     // =========================
-    //  ADMIN BROADCAST MODE
-    //  any message from admin (not /start)
+    // ADMIN BROADCAST MODE (any message except /start)
     // =========================
     if (isAdmin) {
-      // Save the original message coordinates
+      const settings = await getBotSettings();
+
       await prisma.botSettings.update({
-        where: { id: 1 },
+        where: { id: settings.id },
         data: {
           broadcastFromChatId: BigInt(message.chat.id),
           broadcastMessageId: message.message_id
         }
       });
 
-      await sendConfirmKeyboard(
+      await sendBroadcastConfirmKeyboard(
         chatId,
         'Bu xabarni barcha foydalanuvchilarga yuborishni xohlaysizmi?'
       );
@@ -273,6 +345,8 @@ export async function POST(req: NextRequest) {
     // ==========================
     // NORMAL USER REGISTRATION FLOW
     // ==========================
+    const settings = await getBotSettings();
+
     let user = await getOrCreateUser(telegramId, username);
 
     if (!user) {
@@ -332,9 +406,26 @@ export async function POST(req: NextRequest) {
           data: { job: text, step: 'DONE' }
         });
 
-        const finalMessage =
-          settings.finalMessage ||
-          "Siz Najot Nurning 21-noyabr kuni bo'lib o'tadigan biznes nonushta suhbat dasturi uchun ro'yhatdan o'tdingiz. Sizga to'liq ma'lumot uchun menejerlarimiz bog'lanishadi.";
+        // Link user to active event (if any)
+        const activeEvent = await getActiveEvent();
+
+        if (activeEvent) {
+          await prisma.userEvent.upsert({
+            where: {
+              userId_eventId: {
+                userId: user.id,
+                eventId: activeEvent.id
+              }
+            },
+            update: {},
+            create: {
+              userId: user.id,
+              eventId: activeEvent.id
+            }
+          });
+        }
+
+        const finalMessage = settings.finalMessage;
 
         await sendTelegramMessage(chatId, finalMessage);
         break;
