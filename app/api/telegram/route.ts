@@ -321,6 +321,34 @@ export async function POST(req: NextRequest) {
     const isAdmin = await isAdminTelegram(telegramId);
 
     // ===============================
+    // ADMIN DEBUG COMMANDS
+    // ===============================
+    if (isAdmin && textRaw === '/whoami') {
+      await sendTelegramMessage(
+        chatId,
+        `Siz admin ekansiz.\nTelegram ID: ${telegramId.toString()}`
+      );
+      return NextResponse.json({ ok: true });
+    }
+
+    if (isAdmin && textRaw === '/listadmins') {
+      const admins = await prisma.admin.findMany({
+        orderBy: { id: 'asc' }
+      });
+      const lines = admins.map(
+        (a) =>
+          `• ID: ${a.telegramId.toString()}${a.username ? ` (@${a.username})` : ''}`
+      );
+      const text =
+        admins.length === 0
+          ? 'Adminlar ro‘yxati bo‘sh.'
+          : 'Adminlar ro‘yxati:\n' + lines.join('\n');
+
+      await sendTelegramMessage(chatId, text);
+      return NextResponse.json({ ok: true });
+    }
+
+    // ===============================
     // ADMIN COMMANDS: ADD / REMOVE OTHER ADMINS
     // ===============================
     if (isAdmin && textRaw.startsWith('/addadmin')) {
