@@ -8,55 +8,115 @@ export const fetchCache = 'force-no-store';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({} as any));
-    const userIds = Array.isArray(body.userIds) ? body.userIds : [];
-    const text = (body.text ?? '').toString().trim();
+    const contentType = req.headers.get('content-type') || '';
 
-    if (!text) {
-      return NextResponse.json(
-        { error: 'Message text is empty' },
-        { status: 400 }
-      );
+    let userIds: number[] = [];
+    let text = '';
+    let file: File | null = null;
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData();
+
+      const userIdsRaw = formData.get('userIds');
+      if (userIdsRaw) {
+        const str =
+          typeof userIdsRaw === 'string'
+            ? userIdsRaw
+            : userIdsRaw.toString();
+        try {
+          const parsed = JSON.parse(str);
+          if (Array.isArray(parsed)) {
+            userIds = parsed.map((x) => Number(x)).filter((x) => !isNaN(x));
+          }
+        } catch (e) {
+          console.error('Failed to parse userIds JSON:', e);
+        }
+      }
+
+      text = (formData.get('text') as string) || '';
+
+      const fileCandidate = formData.get('file');
+      if (fileCandidate instanceof File) {
+        file = fileCandidate;
+      }
+    } else {
+      const body = await req.json();
+      if (Array.isArray(body.userIds)) {
+        userIds = body.userIds.map((x: any) => Number(x)).filter((x) => !isNaN(x));
+      }
+      text = body.text ?? '';
     }
 
-    if (userIds.length === 0) {
+    if (!userIds.length) {
       return NextResponse.json(
         { error: 'No users selected' },
         { status: 400 }
       );
     }
 
-    const users = await prisma.user.findMany({
-      where: {
-        id: { in: userIds }
-      }
-    });
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) {
+      console.error('TELEGRAM_BOT_TOKEN is not set');
+      return NextResponse.json(
+        { error: 'Bot token is not configured' },
+        { status: 500 }
+      );
+    }
 
-    let sentCount = 0;
+    let hasImage = !!file;
+    let imageBuffer: ArrayBuffer | null = null;
+    let mimeType = '';
+    let fileName = '';
 
-    await Promise.all(
-      users.map((u) =>
-        // telegramId is BIGINT now → convert to string for Telegram API
-        sendTelegramMessage(String(u.telegramId), text).then(
-          () => {
-            sentCount += 1;
-          },
-          (err) => {
-            console.error(
-              'Failed to send message to',
-              u.telegramId.toString(),
-              err
-            );
+    if (hasImage && file) {
+      imageBuffer = await file.arrayBuffer();
+      mimeType = file.type || 'image/jpeg';
+      fileName = file.name || 'image.jpg';
+    }
+
+    let sent = 0;
+
+    for (const id of userIds) {
+      const user = await prisma.user.findUnique({
+        where: { id }
+      });
+      if (!user) continue;
+
+      const chatId = Number(user.telegramId);
+
+      try {
+        if (hasImage && imageBuffer) {
+          const form = new FormData();
+          form.append('chat_id', chatId.toString());
+          if (text) {
+            form.append('caption', text);
           }
-        )
-      )
-    );
 
-    return NextResponse.json({ ok: true, sent: sentCount });
+          const blob = new Blob([imageBuffer], { type: mimeType });
+          form.append('photo', blob, fileName);
+
+          await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+            method: 'POST',
+            body: form as any
+          });
+        } else if (text) {
+          await sendTelegramMessage(chatId, text);
+        } else {
+          // neither text nor image – skip
+          continue;
+        }
+
+        sent++;
+      } catch (err) {
+        console.error(`Failed to send message to user ${id}`, err);
+      }
+    }
+
+    return NextResponse.json({ sent });
   } catch (err) {
-    console.error('Admin message API error:', err);
+    console.error('Error in /api/admin/message:', err);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Failed to send messages' },
       { status: 500 }
     );
   }
