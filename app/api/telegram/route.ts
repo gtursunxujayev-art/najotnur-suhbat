@@ -7,7 +7,6 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
-// Create or get existing user
 async function getOrCreateUser(telegramId: bigint, username: string | null) {
   let existing = await prisma.user.findUnique({
     where: { telegramId }
@@ -19,24 +18,20 @@ async function getOrCreateUser(telegramId: bigint, username: string | null) {
       data: {
         telegramId,
         username,
-        name: '',
-        phone: '',
-        job: '',
-        step: 'ASK_NAME'
+        name: "",
+        phone: "",
+        job: "",
+        step: "ASK_NAME"
       }
     });
   } catch (err: any) {
-    if (
-      err instanceof Prisma.PrismaClientKnownRequestError &&
-      err.code === 'P2002'
-    ) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return await prisma.user.findUnique({ where: { telegramId } });
     }
     throw err;
   }
 }
 
-// Load settings (create defaults if not exist)
 async function getBotSettings() {
   return await prisma.botSettings.upsert({
     where: { id: 1 },
@@ -51,62 +46,27 @@ export async function POST(req: NextRequest) {
   try {
     update = await req.json();
   } catch (e) {
-    console.error('Failed to parse Telegram update:', e);
+    console.error("Failed to parse Telegram update:", e);
     return NextResponse.json({ ok: true });
   }
+
+  console.log("Telegram update:", JSON.stringify(update, null, 2));
 
   const message = update.message ?? update.edited_message;
   if (!message) return NextResponse.json({ ok: true });
 
   const chatId: number = message.chat.id;
   const from = message.from;
-
   if (!from) return NextResponse.json({ ok: true });
 
   const telegramId: bigint = BigInt(from.id);
   const username: string | null = from.username ?? null;
-  const textRaw: string =
-    typeof message.text === 'string' ? message.text.trim() : '';
+  const textRaw: string = typeof message.text === "string" ? message.text.trim() : "";
 
   try {
     const settings = await getBotSettings();
 
-    // ===============================
-    // ADMIN BROADCAST MODE
-    // ===============================
-    const ADMIN_ID = process.env.ADMIN_TELEGRAM_ID
-      ? BigInt(process.env.ADMIN_TELEGRAM_ID)
-      : null;
-
-    if (ADMIN_ID && telegramId === ADMIN_ID && textRaw.startsWith('/send ')) {
-      const broadcastText = textRaw.replace('/send ', '').trim();
-
-      const allUsers = await prisma.user.findMany({
-        where: { step: 'DONE' }
-      });
-
-      let sent = 0;
-      for (const u of allUsers) {
-        try {
-          await sendTelegramMessage(Number(u.telegramId), broadcastText);
-          sent++;
-        } catch (err) {
-          console.error(`Failed to send to ${u.id}`, err);
-        }
-      }
-
-      await sendTelegramMessage(
-        chatId,
-        `Xabar ${sent} ta foydalanuvchiga yuborildi.`
-      );
-
-      return NextResponse.json({ ok: true });
-    }
-
-    // ================
-    // /start — reset
-    // ================
-    if (textRaw === '/start') {
+    if (textRaw === "/start") {
       let user = await prisma.user.findUnique({ where: { telegramId } });
 
       if (user) {
@@ -114,10 +74,10 @@ export async function POST(req: NextRequest) {
           where: { id: user.id },
           data: {
             username,
-            name: '',
-            phone: '',
-            job: '',
-            step: 'ASK_NAME'
+            name: "",
+            phone: "",
+            job: "",
+            step: "ASK_NAME"
           }
         });
       } else {
@@ -125,10 +85,10 @@ export async function POST(req: NextRequest) {
           data: {
             telegramId,
             username,
-            name: '',
-            phone: '',
-            job: '',
-            step: 'ASK_NAME'
+            name: "",
+            phone: "",
+            job: "",
+            step: "ASK_NAME"
           }
         });
       }
@@ -137,18 +97,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Ensure user exists
     let user = await getOrCreateUser(telegramId, username);
 
     if (!user) {
-      await sendTelegramMessage(
-        chatId,
-        'Xatolik yuz berdi. Iltimos, /start orqali qaytadan boshlang.'
-      );
+      await sendTelegramMessage(chatId, "Xatolik yuz berdi. Iltimos, /start bilan qayta urinib ko‘ring.");
       return NextResponse.json({ ok: true });
     }
 
-    // Update username if changed
     if (user.username !== username) {
       try {
         user = await prisma.user.update({
@@ -156,49 +111,40 @@ export async function POST(req: NextRequest) {
           data: { username }
         });
       } catch (e) {
-        console.warn('Could not update username:', e);
+        console.warn("Could not update username:", e);
       }
     }
 
-    // If no text
     if (!textRaw) {
-      await sendTelegramMessage(
-        chatId,
-        "Iltimos, faqat matn yuboring. Boshlash uchun /start yuboring."
-      );
+      await sendTelegramMessage(chatId, "Iltimos, faqat matn yuboring. Boshlash uchun /start yuboring.");
       return NextResponse.json({ ok: true });
     }
 
     const text = textRaw;
 
-    // ===========================
-    // Conversation steps
-    // ===========================
     switch (user.step) {
-      case 'ASK_NAME': {
+      case "ASK_NAME": {
         user = await prisma.user.update({
           where: { id: user.id },
-          data: { name: text, step: 'ASK_PHONE' }
+          data: { name: text, step: "ASK_PHONE" }
         });
-
         await sendTelegramMessage(chatId, settings.askPhoneText);
         break;
       }
 
-      case 'ASK_PHONE': {
+      case "ASK_PHONE": {
         user = await prisma.user.update({
           where: { id: user.id },
-          data: { phone: text, step: 'ASK_JOB' }
+          data: { phone: text, step: "ASK_JOB" }
         });
-
         await sendTelegramMessage(chatId, settings.askJobText);
         break;
       }
 
-      case 'ASK_JOB': {
+      case "ASK_JOB": {
         user = await prisma.user.update({
           where: { id: user.id },
-          data: { job: text, step: 'DONE' }
+          data: { job: text, step: "DONE" }
         });
 
         const finalMessage =
@@ -209,31 +155,24 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      case 'DONE': {
-        await sendTelegramMessage(
-          chatId,
-          "Siz allaqachon ro‘yxatdan o‘tganmisiz. Qayta boshlash uchun /start yuboring."
-        );
+      case "DONE": {
+        await sendTelegramMessage(chatId, "Siz allaqachon ro‘yxatdan o‘tganmisiz. Qayta boshlash uchun /start yuboring.");
         break;
       }
 
       default: {
-        await sendTelegramMessage(
-          chatId,
-          "Boshlash uchun /start buyrug‘ini yuboring."
-        );
+        await sendTelegramMessage(chatId, "Boshlash uchun /start buyrug‘ini yuboring.");
         break;
       }
     }
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    console.error('ERROR in Telegram route:', err);
+    console.error("ERROR in Telegram route:", err);
 
-    await sendTelegramMessage(
-      chatId,
-      "Serverda xatolik yuz berdi. Iltimos, keyinroq yana urinib ko‘ring."
-    );
+    try {
+      await sendTelegramMessage(chatId, "Serverda xatolik yuz berdi. Iltimos, keyinroq yana urinib ko‘ring.");
+    } catch {}
 
     return NextResponse.json({ ok: true });
   }
