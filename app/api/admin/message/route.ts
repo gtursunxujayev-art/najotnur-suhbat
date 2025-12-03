@@ -26,25 +26,33 @@ export async function POST(req: NextRequest) {
         try {
           const parsed = JSON.parse(str);
           if (Array.isArray(parsed)) {
-            userIds = parsed.map((x) => Number(x)).filter((x) => !isNaN(x));
+            userIds = parsed
+              .map((val: unknown) => Number(val))
+              .filter((val: number) => !Number.isNaN(val));
           }
         } catch (e) {
           console.error('Failed to parse userIds JSON:', e);
         }
       }
 
-      text = (formData.get('text') as string) || '';
+      const textField = formData.get('text');
+      text =
+        typeof textField === 'string'
+          ? textField
+          : textField?.toString() ?? '';
 
       const fileCandidate = formData.get('file');
       if (fileCandidate instanceof File) {
         file = fileCandidate;
       }
     } else {
-      const body = await req.json();
+      const body: any = await req.json();
       if (Array.isArray(body.userIds)) {
-        userIds = body.userIds.map((x: any) => Number(x)).filter((x) => !isNaN(x));
+        userIds = (body.userIds as unknown[])
+          .map((val: unknown) => Number(val))
+          .filter((val: number) => !Number.isNaN(val));
       }
-      text = body.text ?? '';
+      text = typeof body.text === 'string' ? body.text : '';
     }
 
     if (!userIds.length) {
@@ -63,7 +71,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let hasImage = !!file;
+    const hasImage = !!file;
     let imageBuffer: ArrayBuffer | null = null;
     let mimeType = '';
     let fileName = '';
