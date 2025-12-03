@@ -18,38 +18,26 @@ type BotSettings = {
   finalMessage: string;
 };
 
-type EventItem = {
-  id: number;
-  title: string;
-  dateTime: string;
-  isActive: boolean;
-};
-
 export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [message, setMessage] = useState('');
+  const [messageImageFile, setMessageImageFile] = useState<File | null>(null);
+  const [messageImagePreview, setMessageImagePreview] = useState<string | null>(
+    null
+  );
   const [sending, setSending] = useState(false);
 
   const [settings, setSettings] = useState<BotSettings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
-  const [events, setEvents] = useState<EventItem[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(false);
-  const [creatingEvent, setCreatingEvent] = useState(false);
-  const [newEventTitle, setNewEventTitle] = useState('');
-  const [newEventDateTime, setNewEventDateTime] = useState('');
-  const [settingActiveId, setSettingActiveId] = useState<number | null>(
-    null
-  );
-
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  // Load users
+  // USERS
   const fetchUsers = async () => {
     setLoadingUsers(true);
     setError(null);
@@ -57,14 +45,15 @@ export default function AdminPage() {
       const res = await fetch('/api/admin/users');
       const data: User[] = await res.json();
       setUsers(data);
-    } catch {
+    } catch (e) {
+      console.error(e);
       setError('Cannot load users');
     } finally {
       setLoadingUsers(false);
     }
   };
 
-  // Load bot settings
+  // BOT SETTINGS
   const fetchSettings = async () => {
     setSettingsLoading(true);
     setError(null);
@@ -72,33 +61,27 @@ export default function AdminPage() {
       const res = await fetch('/api/admin/settings');
       const data: BotSettings = await res.json();
       setSettings(data);
-    } catch {
+    } catch (e) {
+      console.error(e);
       setError('Cannot load bot messages settings');
     } finally {
       setSettingsLoading(false);
     }
   };
 
-  // Load events
-  const fetchEvents = async () => {
-    setEventsLoading(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/admin/events');
-      const data: EventItem[] = await res.json();
-      setEvents(data);
-    } catch {
-      setError('Cannot load events');
-    } finally {
-      setEventsLoading(false);
-    }
-  };
-
   useEffect(() => {
     fetchUsers();
     fetchSettings();
-    fetchEvents();
   }, []);
+
+  // Cleanup preview URL
+  useEffect(() => {
+    return () => {
+      if (messageImagePreview) {
+        URL.revokeObjectURL(messageImagePreview);
+      }
+    };
+  }, [messageImagePreview]);
 
   const toggleSelect = (id: number) => {
     setSelectedIds((prev) =>
@@ -114,9 +97,60 @@ export default function AdminPage() {
     }
   };
 
+  const handleExport = () => {
+    window.location.href = '/api/admin/export';
+  };
+
+  // SAVE BOT SETTINGS
+  const handleSaveSettings = async () => {
+    if (!settings) return;
+    setSettingsSaving(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Cannot save bot messages');
+      } else {
+        setSettings(data);
+        setInfo('Bot messages updated successfully.');
+      }
+    } catch (e) {
+      console.error(e);
+      setError('Cannot save bot messages');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  // IMAGE CHANGE
+  const handleImageChange = (e: any) => {
+    const file = e.target.files?.[0] as File | undefined;
+    if (!file) {
+      setMessageImageFile(null);
+      if (messageImagePreview) URL.revokeObjectURL(messageImagePreview);
+      setMessageImagePreview(null);
+      return;
+    }
+
+    if (messageImagePreview) {
+      URL.revokeObjectURL(messageImagePreview);
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setMessageImageFile(file);
+    setMessageImagePreview(previewUrl);
+  };
+
+  // SEND MESSAGE (TEXT + OPTIONAL IMAGE)
   const handleSend = async () => {
-    if (!message.trim()) {
-      setError('Message text is empty');
+    if (!message.trim() && !messageImageFile) {
+      setError('Message text is empty and no image selected');
       return;
     }
     if (selectedIds.length === 0) {
@@ -129,120 +163,35 @@ export default function AdminPage() {
     setInfo(null);
 
     try {
+      const form = new FormData();
+      form.append('userIds', JSON.stringify(selectedIds));
+      form.append('text', message);
+      if (messageImageFile) {
+        form.append('file', messageImageFile);
+      }
+
       const res = await fetch('/api/admin/message', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userIds: selectedIds, text: message })
+        body: form
       });
 
       const data = await res.json();
+
       if (!res.ok) {
         setError(data.error || 'Error sending messages');
       } else {
         setInfo(`Message sent to ${data.sent} user(s).`);
+        // Optional: clear after send
+        // setMessage('');
+        // setMessageImageFile(null);
+        // if (messageImagePreview) URL.revokeObjectURL(messageImagePreview);
+        // setMessageImagePreview(null);
       }
-    } catch {
+    } catch (e) {
+      console.error(e);
       setError('Error sending messages');
     } finally {
       setSending(false);
-    }
-  };
-
-  const handleExport = () => {
-    window.location.href = '/api/admin/export';
-  };
-
-  const handleSaveSettings = async () => {
-    if (!settings) return;
-
-    setSettingsSaving(true);
-    setError(null);
-    setInfo(null);
-
-    try {
-      const res = await fetch('/api/admin/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'Cannot save bot messages');
-      } else {
-        setSettings(data);
-        setInfo('Bot messages updated successfully.');
-      }
-    } catch {
-      setError('Cannot save bot messages');
-    } finally {
-      setSettingsSaving(false);
-    }
-  };
-
-  const handleCreateEvent = async () => {
-    if (!newEventTitle.trim()) {
-      setError('Event title is required');
-      return;
-    }
-    if (!newEventDateTime.trim()) {
-      setError('Event date/time is required');
-      return;
-    }
-
-    setCreatingEvent(true);
-    setError(null);
-    setInfo(null);
-
-    try {
-      const res = await fetch('/api/admin/events', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: newEventTitle,
-          dateTime: newEventDateTime
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'Cannot create event');
-      } else {
-        setInfo('Event created successfully.');
-        setNewEventTitle('');
-        setNewEventDateTime('');
-        await fetchEvents();
-      }
-    } catch {
-      setError('Cannot create event');
-    } finally {
-      setCreatingEvent(false);
-    }
-  };
-
-  const handleSetActiveEvent = async (id: number) => {
-    setSettingActiveId(id);
-    setError(null);
-    setInfo(null);
-
-    try {
-      const res = await fetch('/api/admin/events/set-current', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId: id })
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || 'Cannot set active event');
-      } else {
-        setEvents(data);
-        setInfo('Active event updated.');
-      }
-    } catch {
-      setError('Cannot set active event');
-    } finally {
-      setSettingActiveId(null);
     }
   };
 
@@ -266,8 +215,7 @@ export default function AdminPage() {
       >
         <h1 style={{ marginBottom: '0.5rem' }}>Admin panel</h1>
         <p style={{ marginBottom: '1.5rem' }}>
-          Users list, CSV export, bulk messages, bot text settings and event
-          management.
+          Users list, CSV export, bulk messages and bot text settings.
         </p>
 
         {error && (
@@ -298,189 +246,6 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* EVENTS SECTION */}
-        <section
-          style={{
-            marginBottom: '1.5rem',
-            padding: '1rem',
-            borderRadius: '0.75rem',
-            border: '1px solid #e2e8f0',
-            background: '#f8fafc'
-          }}
-        >
-          <h2 style={{ marginBottom: '0.5rem' }}>Events</h2>
-          <p
-            style={{
-              marginBottom: '0.75rem',
-              fontSize: '0.9rem',
-              color: '#475569'
-            }}
-          >
-            Bu bo‘limda tadbir yaratish va hozirgi aktiv tadbirni tanlaysiz.
-            Bot foydalanuvchilarni shu aktiv tadbirga bog‘laydi.
-          </p>
-
-          {/* Create event form */}
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '0.5rem',
-              marginBottom: '1rem'
-            }}
-          >
-            <input
-              type="text"
-              placeholder="Event title (masalan: Biznes nonushta)"
-              value={newEventTitle}
-              onChange={(e) => setNewEventTitle(e.target.value)}
-              style={{
-                flex: '2 1 240px',
-                padding: '0.5rem',
-                borderRadius: '0.5rem',
-                border: '1px solid #cbd5e1'
-              }}
-            />
-            <input
-              type="datetime-local"
-              value={newEventDateTime}
-              onChange={(e) => setNewEventDateTime(e.target.value)}
-              style={{
-                flex: '1 1 200px',
-                padding: '0.5rem',
-                borderRadius: '0.5rem',
-                border: '1px solid #cbd5e1'
-              }}
-            />
-            <button
-              onClick={handleCreateEvent}
-              disabled={creatingEvent}
-              style={{
-                padding: '0.5rem 1rem',
-                borderRadius: '0.5rem',
-                border: 'none',
-                cursor: 'pointer'
-              }}
-            >
-              {creatingEvent ? 'Creating...' : 'Create event'}
-            </button>
-          </div>
-
-          {/* Events list */}
-          {eventsLoading ? (
-            <p>Loading events...</p>
-          ) : events.length === 0 ? (
-            <p>Hali tadbirlar yo‘q.</p>
-          ) : (
-            <div
-              style={{
-                maxHeight: '220px',
-                overflow: 'auto',
-                borderRadius: '0.5rem',
-                border: '1px solid #e2e8f0'
-              }}
-            >
-              <table
-                style={{
-                  width: '100%',
-                  borderCollapse: 'collapse',
-                  fontSize: '0.9rem'
-                }}
-              >
-                <thead
-                  style={{
-                    position: 'sticky',
-                    top: 0,
-                    background: '#e2e8f0',
-                    zIndex: 1
-                  }}
-                >
-                  <tr>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
-                      ID
-                    </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
-                      Title
-                    </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
-                      Date/Time
-                    </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
-                      Status
-                    </th>
-                    <th style={{ padding: '0.5rem', textAlign: 'left' }}>
-                      Action
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {events.map((ev) => (
-                    <tr key={ev.id}>
-                      <td
-                        style={{
-                          padding: '0.5rem',
-                          borderTop: '1px solid #e5e7eb'
-                        }}
-                      >
-                        {ev.id}
-                      </td>
-                      <td
-                        style={{
-                          padding: '0.5rem',
-                          borderTop: '1px solid #e5e7eb'
-                        }}
-                      >
-                        {ev.title}
-                      </td>
-                      <td
-                        style={{
-                          padding: '0.5rem',
-                          borderTop: '1px solid #e5e7eb'
-                        }}
-                      >
-                        {new Date(ev.dateTime).toLocaleString()}
-                      </td>
-                      <td
-                        style={{
-                          padding: '0.5rem',
-                          borderTop: '1px solid #e5e7eb'
-                        }}
-                      >
-                        {ev.isActive ? 'ACTIVE' : '-'}
-                      </td>
-                      <td
-                        style={{
-                          padding: '0.5rem',
-                          borderTop: '1px solid #e5e7eb'
-                        }}
-                      >
-                        {ev.isActive ? (
-                          <span>Current</span>
-                        ) : (
-                          <button
-                            onClick={() => handleSetActiveEvent(ev.id)}
-                            disabled={settingActiveId === ev.id}
-                            style={{
-                              padding: '0.25rem 0.75rem',
-                              borderRadius: '0.5rem',
-                              border: 'none',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            {settingActiveId === ev.id
-                              ? 'Setting...'
-                              : 'Set active'}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
         {/* BOT MESSAGES SETTINGS */}
         <section
           style={{
@@ -500,7 +265,7 @@ export default function AdminPage() {
             }}
           >
             Bu yerda botning foydalanuvchiga yozadigan matnlarini
-            o‘zgartirasiz.
+            o&apos;zgartirasiz.
           </p>
 
           {settingsLoading && !settings ? (
@@ -514,7 +279,7 @@ export default function AdminPage() {
                   marginBottom: '0.25rem'
                 }}
               >
-                1. Birinchi xabar (ism so‘rash):
+                1. Birinchi xabar (ism so&apos;rash):
               </label>
               <textarea
                 value={settings.greetingText}
@@ -529,7 +294,7 @@ export default function AdminPage() {
                 style={{
                   width: '100%',
                   borderRadius: '0.5rem',
-                  padding: '0.5rem',
+                  padding: '0.5rem 0.75rem',
                   border: '1px solid #cbd5f5',
                   marginBottom: '0.75rem'
                 }}
@@ -542,7 +307,7 @@ export default function AdminPage() {
                   marginBottom: '0.25rem'
                 }}
               >
-                2. Telefon raqamini so‘rash xabari:
+                2. Telefon raqamini so&apos;rash xabari:
               </label>
               <textarea
                 value={settings.askPhoneText}
@@ -557,7 +322,7 @@ export default function AdminPage() {
                 style={{
                   width: '100%',
                   borderRadius: '0.5rem',
-                  padding: '0.5rem',
+                  padding: '0.5rem 0.75rem',
                   border: '1px solid #cbd5f5',
                   marginBottom: '0.75rem'
                 }}
@@ -570,22 +335,20 @@ export default function AdminPage() {
                   marginBottom: '0.25rem'
                 }}
               >
-                3. Kasbini so‘rash xabari:
+                3. Kasbini so&apos;rash xabari:
               </label>
               <textarea
                 value={settings.askJobText}
                 onChange={(e) =>
                   setSettings((prev) =>
-                    prev
-                      ? { ...prev, askJobText: e.target.value }
-                      : prev
+                    prev ? { ...prev, askJobText: e.target.value } : prev
                   )
                 }
                 rows={2}
                 style={{
                   width: '100%',
                   borderRadius: '0.5rem',
-                  padding: '0.5rem',
+                  padding: '0.5rem 0.75rem',
                   border: '1px solid #cbd5f5',
                   marginBottom: '0.75rem'
                 }}
@@ -598,24 +361,22 @@ export default function AdminPage() {
                   marginBottom: '0.25rem'
                 }}
               >
-                4. Oxirgi xabar (ro‘yxatdan o‘tganidan keyin yuboriladi):
+                4. Yakuniy xabar (ro&apos;yxatdan o&apos;tganidan keyin):
               </label>
               <textarea
                 value={settings.finalMessage}
                 onChange={(e) =>
                   setSettings((prev) =>
-                    prev
-                      ? { ...prev, finalMessage: e.target.value }
-                      : prev
+                    prev ? { ...prev, finalMessage: e.target.value } : prev
                   )
                 }
                 rows={3}
                 style={{
                   width: '100%',
                   borderRadius: '0.5rem',
-                  padding: '0.5rem',
+                  padding: '0.5rem 0.75rem',
                   border: '1px solid #cbd5f5',
-                  marginBottom: '1rem'
+                  marginBottom: '0.75rem'
                 }}
               />
 
@@ -658,7 +419,6 @@ export default function AdminPage() {
           >
             {loadingUsers ? 'Loading users...' : 'Reload users'}
           </button>
-
           <button
             onClick={handleExport}
             style={{
@@ -670,7 +430,6 @@ export default function AdminPage() {
           >
             Export CSV
           </button>
-
           <button
             onClick={selectAll}
             style={{
@@ -680,13 +439,40 @@ export default function AdminPage() {
               cursor: 'pointer'
             }}
           >
-            {selectedIds.length === users.length ? 'Unselect all' : 'Select all'}
+            {selectedIds.length === users.length
+              ? 'Unselect all'
+              : 'Select all'}
           </button>
         </div>
 
         {/* MESSAGE SENDER */}
         <section style={{ marginBottom: '1.5rem' }}>
           <h2 style={{ marginBottom: '0.5rem' }}>Send message</h2>
+
+          {/* IMAGE UPLOADER */}
+          <div style={{ marginBottom: '0.75rem' }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '0.9rem',
+                marginBottom: '0.25rem'
+              }}
+            >
+              Image (optional):
+            </label>
+            <input type="file" accept="image/*" onChange={handleImageChange} />
+            {messageImagePreview && (
+              <div style={{ marginTop: '0.75rem' }}>
+                <img
+                  src={messageImagePreview}
+                  alt="Preview"
+                  style={{ maxWidth: '200px', borderRadius: '8px' }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* TEXT */}
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
@@ -695,7 +481,7 @@ export default function AdminPage() {
             style={{
               width: '100%',
               borderRadius: '0.5rem',
-              padding: '0.5rem',
+              padding: '0.5rem 0.75rem',
               border: '1px solid #cbd5f5',
               marginBottom: '0.75rem'
             }}
