@@ -14,11 +14,9 @@ const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID
 
 // Check if telegramId is admin (via DB + optional ENV bootstrap)
 async function isAdminTelegram(telegramId: bigint): Promise<boolean> {
-  // 1) Env-based bootstrap admin
   if (ADMIN_TELEGRAM_ID && telegramId === ADMIN_TELEGRAM_ID) {
     return true;
   }
-  // 2) DB-based admins
   const admin = await prisma.admin.findUnique({ where: { telegramId } });
   return !!admin;
 }
@@ -341,12 +339,12 @@ export async function POST(req: NextRequest) {
         (a) =>
           `• ID: ${a.telegramId.toString()}${a.username ? ` (@${a.username})` : ''}`
       );
-      const text =
+      const textAdmins =
         admins.length === 0
           ? 'Adminlar ro‘yxati bo‘sh.'
           : 'Adminlar ro‘yxati:\n' + lines.join('\n');
 
-      await sendTelegramMessage(chatId, text);
+      await sendTelegramMessage(chatId, textAdmins);
       return NextResponse.json({ ok: true });
     }
 
